@@ -27,16 +27,6 @@ fn main() -> ! {
     let mut port_a = peripherals.GPIOA;
     let mut port_c = peripherals.GPIOC;
     let mut tim2 = peripherals.TIM2;
-//    let exti = peripherals.EXTI;
-//
-//    exti.exticr1.modify(|_r, w|
-//        // EXTIm GPIO port selection (m = 4 * (x - 1))
-//        // cr1 <-> x = 1, m = 0; PA[m] <-> PA[0]
-//        unsafe {
-//            w.exti0_7().bits(0x00)
-//        }
-//    );
-//    exti.rtsr1.modify(|_, w| w.tr0().set_bit());
 
     rcc.iopenr.modify(|_r, w|
         w
@@ -59,11 +49,6 @@ fn main() -> ! {
             .pupdr11().bits(0)
             .pupdr12().bits(0)
     });
-//    port_a.moder.modify(|_r, w| unsafe {
-//        w
-//            .moder11().bits(MODE_OUTPUT)
-//            .moder12().bits(MODE_OUTPUT)
-//    });
     port_a.ospeedr.modify(|_r, w| unsafe {
         w
             .ospeedr11().bits(OSPEED_LOW)
@@ -76,10 +61,6 @@ fn main() -> ! {
     );
 
     port_c.pupdr.modify(|_r, w| unsafe { w.pupdr14().bits(0) });
-//    port_c.moder.modify(|_r, w| unsafe {
-//        w
-//            .moder14().bits(MODE_OUTPUT)
-//    });
     port_c.ospeedr.modify(|_r, w| unsafe { w.ospeedr14().bits(OSPEED_LOW) });
     port_c.otyper.modify(|_r, w| w.ot14().clear_bit());
 
@@ -88,7 +69,6 @@ fn main() -> ! {
 
     let notes = [A, B, C, A * 2, B * 2, C * 2, A * 3, B * 3, C * 3];
     let distr = rand::distributions::Uniform::new_inclusive(1, 100);
-//    let mut random_play = false;
     let mut random_play_countdown = rng.gen_range(100, 1000);
     let mut playing = false;
 
