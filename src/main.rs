@@ -34,7 +34,7 @@ const APP: () = {
         sound_timer: Timer<stm32::TIM17>,
     }
 
-    #[init(spawn = [play_intro])]
+    #[init()]
     fn init(mut ctx: init::Context) -> init::LateResources {
         let mut rcc = ctx.device.RCC.constrain();
 
@@ -42,7 +42,6 @@ const APP: () = {
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
 
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
-        ctx.spawn.play_intro().unwrap();
 
         init::LateResources {
             exti: ctx.device.EXTI,
@@ -61,10 +60,16 @@ const APP: () = {
         ctx.resources.sound_timer.clear_irq();
     }
 
-    #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_tone])]
+    #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_intro, play_tone])]
     fn button_click(mut ctx: button_click::Context) {
-        let freq = *sound::NOTES.choose(&mut ctx.resources.rng).unwrap();
-        ctx.spawn.play_tone(freq, 300.ms()).unwrap();
+        static mut COUNTER: u32 = 0;
+        if *COUNTER == 3 {
+            ctx.spawn.play_intro().unwrap();
+        } else {
+            let freq = *sound::NOTES.choose(&mut ctx.resources.rng).unwrap();
+            ctx.spawn.play_tone(freq, 300.ms()).unwrap();
+        }
+        *COUNTER += 1;
         ctx.resources.exti.unpend(Event::GPIO0);
     }
 
