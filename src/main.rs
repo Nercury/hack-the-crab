@@ -42,9 +42,7 @@ const APP: () = {
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
 
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
-        
         ctx.spawn.play_intro().unwrap();
-        
         init::LateResources {
             exti: ctx.device.EXTI,
             sound_timer: ctx.device.TIM17.timer(&mut rcc),
@@ -55,8 +53,6 @@ const APP: () = {
             buzzer: gpioc.pc14.into_push_pull_output(),
         }
     }
-
-
 
     #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_intro, play_tone])]
     fn button_click(mut ctx: button_click::Context) {
