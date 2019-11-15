@@ -34,7 +34,7 @@ const APP: () = {
         sound_timer: Timer<stm32::TIM17>,
     }
 
-    #[init()]
+    #[init( spawn = [play_intro])]
     fn init(mut ctx: init::Context) -> init::LateResources {
         let mut rcc = ctx.device.RCC.constrain();
 
@@ -42,7 +42,9 @@ const APP: () = {
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
 
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
-
+        
+        ctx.spawn.play_intro().unwrap();
+        
         init::LateResources {
             exti: ctx.device.EXTI,
             sound_timer: ctx.device.TIM17.timer(&mut rcc),
@@ -54,11 +56,7 @@ const APP: () = {
         }
     }
 
-    #[task(binds = TIM17, priority = 3, resources = [sound_timer, buzzer])]
-    fn sound_tick(ctx: sound_tick::Context) {
-        ctx.resources.buzzer.toggle().unwrap();
-        ctx.resources.sound_timer.clear_irq();
-    }
+
 
     #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_intro, play_tone])]
     fn button_click(mut ctx: button_click::Context) {
@@ -80,7 +78,7 @@ const APP: () = {
         }
     }
 
-    #[task(priority = 2, capacity = 128, resources = [left_eye, right_eye, delay, sound_timer])]
+    #[task(priority = 2, capacity = 64, resources = [left_eye, right_eye, delay, sound_timer])]
     fn play_tone(mut ctx: play_tone::Context, freq: u32, duration: MicroSecond) {
         ctx.resources.right_eye.set_high().unwrap();
         ctx.resources.left_eye.set_high().unwrap();
@@ -91,7 +89,6 @@ const APP: () = {
                 timer.listen();
             });
         }
-
         ctx.resources.delay.delay(duration);
         ctx.resources.sound_timer.lock(|timer| {
             timer.unlisten();
@@ -101,8 +98,14 @@ const APP: () = {
         ctx.resources.left_eye.set_low().unwrap();
     }
 
+    #[task(binds = TIM17, priority = 3, resources = [sound_timer, buzzer])]
+    fn sound_tick(ctx: sound_tick::Context) {
+        ctx.resources.buzzer.toggle().unwrap();
+        ctx.resources.sound_timer.clear_irq();
+    }
+
     extern "C" {
-        fn USART1();
-        fn USART2();
+        fn I2C1();
+        fn I2C2();
     }
 };

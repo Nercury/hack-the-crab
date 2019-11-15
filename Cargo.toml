@@ -18,5 +18,8 @@ version = "0.7.2"
 
 [dependencies.stm32g0xx-hal]
 default-features = false
-features = ["rt", "stm32g070"]
-version = "0.0.3"
+features = ["rt", "stm32g030"]
+version = "0.0.7"
+
+[profile.release]
+lto = true
