@@ -1,188 +1,108 @@
-#![no_main]
 #![no_std]
+#![no_main]
+#![deny(warnings)]
 
-extern crate stm32g0 as device;
-
-extern crate cortex_m_rt as rt;
-extern crate cortex_m_semihosting;
-
-// makes `panic!` print messages to the host stderr using semihosting
-extern crate panic_semihosting;
-//extern crate panic_halt;
-
-use cortex_m_semihosting::hprintln;
-use rt::entry;
-
+extern crate panic_halt;
 extern crate rand;
-use rand::Rng;
-use rand::SeedableRng;
+extern crate rtfm;
+extern crate stm32g0xx_hal as hal;
+
+use hal::delay::Delay;
+use hal::exti::Event;
+use hal::gpio::{gpioa::*, gpioc::*};
+use hal::gpio::{Output, PushPull, SignalEdge};
+use hal::prelude::*;
+use hal::stm32;
+use hal::time::MicroSecond;
+use hal::timer::Timer;
+use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
+use rtfm::app;
 
-// use `main` as the entry point of this application
-// `main` is not allowed to return
-#[entry]
-fn main() -> ! {
-    let peripherals = device::stm32g0x0::Peripherals::take().unwrap();
-    let mut rcc = peripherals.RCC;
-    let mut port_a = peripherals.GPIOA;
-    let mut port_c = peripherals.GPIOC;
-    let mut tim2 = peripherals.TIM2;
+mod sound;
 
-    rcc.iopenr.modify(|_r, w|
-        w
-            .iopaen().bit(true)
-            .iopcen().bit(true)
-    );
-    rcc.apbenr1.modify(|_r, w| w.tim2en().bit(true));
+#[app(device = hal::stm32, peripherals = true)]
+const APP: () = {
+    struct Resources {
+        delay: Delay,
+        rng: SmallRng,
+        exti: stm32::EXTI,
+        buzzer: PC14<Output<PushPull>>,
+        right_eye: PA11<Output<PushPull>>,
+        left_eye: PA12<Output<PushPull>>,
+        sound_timer: Timer<stm32::TIM17>,
+    }
 
-    port_a.pupdr.modify(|_r, w| unsafe {
-        w
-            .pupdr0().bits(0b10)
-    });
-    port_a.moder.modify(|_r, w| unsafe {
-        w
-            .moder0().bits(MODE_INPUT)
-    });
+    #[init()]
+    fn init(mut ctx: init::Context) -> init::LateResources {
+        let mut rcc = ctx.device.RCC.constrain();
 
-    port_a.pupdr.modify(|_r, w| unsafe {
-        w
-            .pupdr11().bits(0)
-            .pupdr12().bits(0)
-    });
-    port_a.ospeedr.modify(|_r, w| unsafe {
-        w
-            .ospeedr11().bits(OSPEED_LOW)
-            .ospeedr12().bits(OSPEED_LOW)
-    });
-    port_a.otyper.modify(|_r, w|
-        w
-            .ot11().clear_bit()
-            .ot12().clear_bit()
-    );
+        let gpioa = ctx.device.GPIOA.split(&mut rcc);
+        let gpioc = ctx.device.GPIOC.split(&mut rcc);
 
-    port_c.pupdr.modify(|_r, w| unsafe { w.pupdr14().bits(0) });
-    port_c.ospeedr.modify(|_r, w| unsafe { w.ospeedr14().bits(OSPEED_LOW) });
-    port_c.otyper.modify(|_r, w| w.ot14().clear_bit());
+        gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
 
-    let seed: [u8; 16] = [0; 16];
-    let mut rng = rand::rngs::SmallRng::from_seed(seed);
-
-    let notes = [A, B, C, A * 2, B * 2, C * 2, A * 3, B * 3, C * 3];
-    let distr = rand::distributions::Uniform::new_inclusive(1, 100);
-    let mut random_play_countdown = rng.gen_range(100, 1000);
-    let mut playing = false;
-
-    loop {
-        if !playing {
-            if port_a.idr.read().idr0().bit_is_set() {
-                playing = true;
-                sleep(200, &mut tim2);
-            }
-        } else {
-            port_a.moder.modify(|_r, w| unsafe {
-                w
-                    .moder11().bits(MODE_OUTPUT)
-                    .moder12().bits(MODE_OUTPUT)
-            });
-            port_c.moder.modify(|_r, w| unsafe {
-                w
-                    .moder14().bits(MODE_OUTPUT)
-            });
-
-            let left_eye = |v| {
-                if v {
-                    port_a.bsrr.write(|w|
-                        w
-                            .bs12().set_bit()
-                    );
-                } else {
-                    port_a.brr.write(|w|
-                        w
-                            .br12().set_bit()
-                    );
-                }
-            };
-
-            let right_eye = |v| {
-                if v {
-                    port_a.bsrr.write(|w|
-                        w
-                            .bs11().set_bit()
-                    );
-                } else {
-                    port_a.brr.write(|w|
-                        w
-                            .br11().set_bit()
-                    );
-                }
-            };
-
-            left_eye(true);
-            right_eye(true);
-
-            sleep(200, &mut tim2);
-
-            let note = *notes.choose(&mut rng).unwrap();
-            produce(250, note, &mut port_c, &mut tim2);
-
-            sleep(200, &mut tim2);
-
-            left_eye(false);
-            right_eye(false);
-
-            port_a.moder.modify(|_r, w| unsafe {
-                w
-                    .moder11().bits(MODE_INPUT)
-                    .moder12().bits(MODE_INPUT)
-            });
-            port_c.moder.modify(|_r, w| unsafe {
-                w
-                    .moder14().bits(MODE_INPUT)
-            });
-
-            playing = false;
+        init::LateResources {
+            exti: ctx.device.EXTI,
+            sound_timer: ctx.device.TIM17.timer(&mut rcc),
+            rng: SmallRng::from_seed([0; 16]),
+            delay: ctx.core.SYST.delay(&rcc.clocks),
+            right_eye: gpioa.pa11.into_push_pull_output(),
+            left_eye: gpioa.pa12.into_push_pull_output(),
+            buzzer: gpioc.pc14.into_push_pull_output(),
         }
     }
-}
 
-fn sleep(times: u32, tim2: &mut device::stm32g0x0::TIM2) {
-    for i in 0..times {
-        pause(tim2, A);
+    #[task(binds = TIM17, priority = 3, resources = [sound_timer, buzzer])]
+    fn sound_tick(ctx: sound_tick::Context) {
+        ctx.resources.buzzer.toggle().unwrap();
+        ctx.resources.sound_timer.clear_irq();
     }
-}
 
-fn produce(times: u32, note: u16, port_c: &mut device::stm32g0x0::GPIOC, tim2: &mut device::stm32g0x0::TIM2) {
-    for i in 0..times {
-        port_c.bsrr.write(|w|
-            w
-                .bs14().set_bit()
-        );
-        pause(tim2, note);
-        port_c.brr.write(|w|
-            w
-                .br14().set_bit()
-        );
-        pause(tim2, note);
+    #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_intro, play_tone])]
+    fn button_click(mut ctx: button_click::Context) {
+        static mut COUNTER: u32 = 0;
+        if *COUNTER == 3 {
+            ctx.spawn.play_intro().unwrap();
+        } else {
+            let freq = *sound::NOTES.choose(&mut ctx.resources.rng).unwrap();
+            ctx.spawn.play_tone(freq, 300.ms()).unwrap();
+        }
+        *COUNTER += 1;
+        ctx.resources.exti.unpend(Event::GPIO0);
     }
-}
 
-const A: u16 = 0x8F7;
-const B: u16 = (0x8F7 as f32 / 1.122462) as u16;
-const C: u16 = (0x8F7 as f32 / 1.189207) as u16;
+    #[task(priority = 1, spawn = [play_tone])]
+    fn play_intro(ctx: play_intro::Context) {
+        for (freq, duration) in sound::INTRO.iter() {
+            ctx.spawn.play_tone(*freq, duration.ms()).unwrap();
+        }
+    }
 
-fn pause(tim2: &mut device::stm32g0x0::TIM2, time: u16) {
-        tim2.egr.write(|w| w.ug().set_bit());
-        tim2.cr1.write(|w| w.cen().set_bit());
-        while tim2.cnt.read().cnt_l().bits() < time { cortex_m::asm::nop() }
-        tim2.cr1.write(|w| w.cen().clear_bit());
-}
+    #[task(priority = 2, capacity = 128, resources = [left_eye, right_eye, delay, sound_timer])]
+    fn play_tone(mut ctx: play_tone::Context, freq: u32, duration: MicroSecond) {
+        ctx.resources.right_eye.set_high().unwrap();
+        ctx.resources.left_eye.set_high().unwrap();
 
-const OSPEED_VERY_LOW: u8 = 0b00;
-const OSPEED_LOW: u8 = 0b01;
-const OSPEED_HIGH: u8 = 0b00;
-const OSPEED_VERY_HIGH: u8 = 0b11;
+        if freq > 0 {
+            ctx.resources.sound_timer.lock(|timer| {
+                timer.start(freq.hz());
+                timer.listen();
+            });
+        }
 
-const MODE_INPUT: u8 = 0b00;
-const MODE_OUTPUT: u8 = 0b01;
-const MODE_AF: u8 = 0b10;
-const MODE_ANALOG: u8 = 0b11;
+        ctx.resources.delay.delay(duration);
+        ctx.resources.sound_timer.lock(|timer| {
+            timer.unlisten();
+        });
+
+        ctx.resources.right_eye.set_low().unwrap();
+        ctx.resources.left_eye.set_low().unwrap();
+    }
+
+    extern "C" {
+        fn USART1();
+        fn USART2();
+    }
+};
