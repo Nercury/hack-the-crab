@@ -2,106 +2,91 @@
 #![no_main]
 #![deny(warnings)]
 
-extern crate panic_halt;
-extern crate rand;
+extern crate panic_semihosting;
 extern crate rtfm;
 extern crate stm32g0xx_hal as hal;
 
-use hal::delay::Delay;
+mod r3tl;
+
 use hal::exti::Event;
-use hal::gpio::{gpioa::*, gpioc::*};
+use hal::gpio::gpioa::{PA11, PA12};
+use hal::gpio::gpioc::PC14;
 use hal::gpio::{Output, PushPull, SignalEdge};
 use hal::prelude::*;
 use hal::stm32;
-use hal::time::MicroSecond;
-use hal::timer::Timer;
-use rand::rngs::SmallRng;
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
+use r3tl::Player;
 use rtfm::app;
 
-mod sound;
+pub const RINGTONES: [&str; 6] = [
+    "Simpsons:d=4,o=5,b=160:32p,c.6,e6,f#6,8a6,g.6,e6,c6,8a,8f#,8f#,8f#,2g",
+    "Xfiles:d=4,o=5,b=140:e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,g6,f#6,e6,d6,e6,2b.,1p,g6,f#6,e6,d6,f#6,2b.,1p,e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,e6,2b.",
+    "MahnaMahna:d=16,o=6,b=180:c#,c.,b5,8a#.5,8f.,4g#,a#,g.,4d#,8p,c#,c.,b5,8a#.5,8f.,g#.,8a#.,4g,8p,c#,c.,b5,8a#.5,8f.,4g#,f,g.,8d#.,f,g.,8d#.,f,8g,8d#.,f,8g,d#,8c,a#5,8d#.,8d#.,4d#,8d#.",
+    "Looney:d=4,o=5,b=180:32p,c6,8f6,8e6,8d6,8c6,a.,8c6,8f6,8e6,8d6,8d#6,e.6,8e6,8e6,8c6,8d6,8c6,8e6,8c6,8d6,8a,8c6,8g,8a#,8a,8f",
+    "Muppets:d=4,o=5,b=160:c6,c6,a,b,8a,b,g,p,c6,c6,a,8b,8a,8p,g.,p,e,e,g,f,8e,f,8c6,8c,8d,e,8e,8e,8p,8e,g,2p,c6,c6,a,b,8a,b,g,p,c6,c6,a,8b,a,g.,p,e,e,g,f,8e,f,8c6,8c,8d,e,8e,d,8d,c",
+    "Bond:d=4,o=5,b=140:32p,16c#6,32d#6,32d#6,16d#6,8d#6,16c#6,16c#6,16c#6,16c#6,32e6,32e6,16e6,8e6,16d#6,16d#6,16d#6,16c#6,32d#6,32d#6,16d#6,8d#6,16c#6,16c#6,16c#6,16c#6,32e6,32e6,16e6,8e6,16d#6,16d6,16c#6,16c#7,c.7,16g#6,16f#6,g#.6",
+];
 
 #[app(device = hal::stm32, peripherals = true)]
 const APP: () = {
     struct Resources {
-        delay: Delay,
-        rng: SmallRng,
         exti: stm32::EXTI,
-        buzzer: PC14<Output<PushPull>>,
+        player: Player,
         right_eye: PA11<Output<PushPull>>,
         left_eye: PA12<Output<PushPull>>,
-        sound_timer: Timer<stm32::TIM17>,
+        buzzer: PC14<Output<PushPull>>,
     }
 
-    #[init( spawn = [play_intro])]
+    #[init(spawn = [play_ringtone])]
     fn init(mut ctx: init::Context) -> init::LateResources {
         let mut rcc = ctx.device.RCC.constrain();
-
         let gpioa = ctx.device.GPIOA.split(&mut rcc);
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
-
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
-        ctx.spawn.play_intro().unwrap();
+
+        ctx.spawn.play_ringtone().unwrap();
         init::LateResources {
             exti: ctx.device.EXTI,
-            sound_timer: ctx.device.TIM17.timer(&mut rcc),
-            rng: SmallRng::from_seed([0; 16]),
-            delay: ctx.core.SYST.delay(&rcc.clocks),
+            buzzer: gpioc.pc14.into_push_pull_output(),
             right_eye: gpioa.pa11.into_push_pull_output(),
             left_eye: gpioa.pa12.into_push_pull_output(),
-            buzzer: gpioc.pc14.into_push_pull_output(),
+            player: Player::new(
+                ctx.device.TIM2.timer(&mut rcc),
+                ctx.device.TIM3.timer(&mut rcc),
+            ),
         }
     }
 
-    #[task(binds = EXTI0_1, resources = [exti, rng], spawn = [play_intro, play_tone])]
-    fn button_click(mut ctx: button_click::Context) {
-        static mut COUNTER: u32 = 0;
-        if *COUNTER == 3 {
-            ctx.spawn.play_intro().unwrap();
-        } else {
-            let freq = *sound::NOTES.choose(&mut ctx.resources.rng).unwrap();
-            ctx.spawn.play_tone(freq, 300.ms()).unwrap();
-        }
-        *COUNTER += 1;
+    #[task(resources = [player])]
+    fn play_ringtone(mut ctx: play_ringtone::Context) {
+        let idx = stm32::SYST::get_current() % (RINGTONES.len() as u32);
+        let ringtone = RINGTONES[idx as usize];
+        ctx.resources.player.lock(|player| {
+            player.play(ringtone);
+        });
+    }
+
+    #[task(binds = EXTI0_1, resources = [exti, player], spawn = [play_ringtone])]
+    fn button_click(ctx: button_click::Context) {
+        ctx.spawn.play_ringtone().unwrap();
         ctx.resources.exti.unpend(Event::GPIO0);
     }
 
-    #[task(priority = 1, spawn = [play_tone])]
-    fn play_intro(ctx: play_intro::Context) {
-        for (freq, duration) in sound::INTRO.iter() {
-            ctx.spawn.play_tone(*freq, duration.ms()).unwrap();
-        }
-    }
-
-    #[task(priority = 2, capacity = 64, resources = [left_eye, right_eye, delay, sound_timer])]
-    fn play_tone(mut ctx: play_tone::Context, freq: u32, duration: MicroSecond) {
-        ctx.resources.right_eye.set_high().unwrap();
-        ctx.resources.left_eye.set_high().unwrap();
-
-        if freq > 0 {
-            ctx.resources.sound_timer.lock(|timer| {
-                timer.start(freq.hz());
-                timer.listen();
-            });
-        }
-        ctx.resources.delay.delay(duration);
-        ctx.resources.sound_timer.lock(|timer| {
-            timer.unlisten();
+    #[task(binds = TIM2, priority = 1, resources = [player])]
+    fn frame_tick(mut ctx: frame_tick::Context) {
+        ctx.resources.player.lock(|player| {
+            player.frame_tick();
         });
-
-        ctx.resources.right_eye.set_low().unwrap();
-        ctx.resources.left_eye.set_low().unwrap();
     }
 
-    #[task(binds = TIM17, priority = 3, resources = [sound_timer, buzzer])]
+    #[task(binds = TIM3, priority = 2, resources = [player, right_eye, left_eye, buzzer])]
     fn sound_tick(ctx: sound_tick::Context) {
+        ctx.resources.left_eye.toggle().unwrap();
+        ctx.resources.right_eye.toggle().unwrap();
         ctx.resources.buzzer.toggle().unwrap();
-        ctx.resources.sound_timer.clear_irq();
+        ctx.resources.player.sound_tick();
     }
 
     extern "C" {
         fn I2C1();
-        fn I2C2();
     }
 };
