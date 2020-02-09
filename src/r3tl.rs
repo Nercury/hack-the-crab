@@ -42,6 +42,10 @@ impl Player {
         self.frame = 0;
     }
 
+    pub fn is_playing(&self) -> bool {
+        self.ringtone.is_some()
+    }
+
     pub fn stop(&mut self) {
         self.ringtone = None;
         self.frame_timer.unlisten();
@@ -98,10 +102,10 @@ impl Ringtone {
         let mut octave = 6;
         let mut bpm = 65;
 
-        let mut rtx = r3tl.split(":");
+        let mut rtx = r3tl.split(':');
         let name = rtx.next().unwrap();
-        let mut control = rtx.next().unwrap().split(",");
-        while let Some(param) = control.next() {
+        let control = rtx.next().unwrap().split(',');
+        for param in control {
             match param.split_at(2) {
                 ("d=", val) => duration = val.parse().unwrap(),
                 ("o=", val) => octave = val.parse().unwrap(),
@@ -116,7 +120,7 @@ impl Ringtone {
             duration,
             octave,
             bpm,
-            tones: Some(rtx.next().unwrap().split(",")),
+            tones: Some(rtx.next().unwrap().split(&",")),
         }
     }
 
@@ -188,7 +192,7 @@ impl Iterator for Ringtone {
 
     fn next(&mut self) -> Option<Tone> {
         if let Some(tone) = &mut self.tones {
-            return tone.next().map(|val| self.parse_tone(val))
+            return tone.next().map(|val| self.parse_tone(val));
         }
         None
     }

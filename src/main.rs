@@ -43,7 +43,6 @@ const APP: () = {
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
 
-        ctx.spawn.play_ringtone().unwrap();
         init::LateResources {
             exti: ctx.device.EXTI,
             buzzer: gpioc.pc14.into_push_pull_output(),
@@ -58,8 +57,9 @@ const APP: () = {
 
     #[task(resources = [player])]
     fn play_ringtone(mut ctx: play_ringtone::Context) {
-        let idx = stm32::SYST::get_current() % (RINGTONES.len() as u32);
-        let ringtone = RINGTONES[idx as usize];
+        static mut COUNTER: usize = 0;
+        *COUNTER += 1;
+        let ringtone = RINGTONES[*COUNTER % RINGTONES.len()];
         ctx.resources.player.lock(|player| {
             player.play(ringtone);
         });
@@ -71,19 +71,28 @@ const APP: () = {
         ctx.resources.exti.unpend(Event::GPIO0);
     }
 
-    #[task(binds = TIM2, priority = 1, resources = [player])]
-    fn frame_tick(mut ctx: frame_tick::Context) {
-        ctx.resources.player.lock(|player| {
+    #[task(binds = TIM2, priority = 1, resources = [player, right_eye, left_eye, buzzer])]
+    fn frame_tick(ctx: frame_tick::Context) {
+        let mut player = ctx.resources.player;
+        let mut left_eye = ctx.resources.left_eye;
+        let mut right_eye = ctx.resources.right_eye;
+        let mut buzzer = ctx.resources.buzzer;
+        player.lock(|player| {
             player.frame_tick();
+            if !player.is_playing() {
+                left_eye.lock(|left_eye| left_eye.set_low().unwrap());
+                right_eye.lock(|right_eye| right_eye.set_low().unwrap());
+                buzzer.lock(|buzzer| buzzer.set_high().unwrap());
+            }
         });
     }
 
     #[task(binds = TIM3, priority = 2, resources = [player, right_eye, left_eye, buzzer])]
     fn sound_tick(ctx: sound_tick::Context) {
+        ctx.resources.player.sound_tick();
         ctx.resources.left_eye.toggle().unwrap();
         ctx.resources.right_eye.toggle().unwrap();
         ctx.resources.buzzer.toggle().unwrap();
-        ctx.resources.player.sound_tick();
     }
 
     extern "C" {
