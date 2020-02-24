@@ -177,7 +177,7 @@ impl Ringtone {
                 scale => octave = scale.to_digit(10).unwrap_or(self.octave),
             }
         }
-        let mut frames = 98 / duration;
+        let mut frames = 130 / duration;
         if dot {
             frames += frames / 2
         }
