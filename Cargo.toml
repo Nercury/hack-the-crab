@@ -10,13 +10,12 @@ panic-semihosting = "0.5.3"
 cortex-m = "0.6.1"
 cortex-m-rt = "0.6.10"
 cortex-m-rtfm = "0.5.0"
-
-[dependencies.rand]
-default-features = false
-features = ["small_rng"]
-version = "0.7.2"
+cortex-m-semihosting = "0.3.5"
 
 [dependencies.stm32g0xx-hal]
 default-features = false
-features = ["rt", "stm32g070"]
-version = "0.0.3"
+features = ["rt", "stm32g030"]
+version = "0.0.7"
+
+[profile.release]
+lto = true
