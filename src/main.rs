@@ -38,7 +38,7 @@ const APP: () = {
 
     #[init(spawn = [play_ringtone])]
     fn init(mut ctx: init::Context) -> init::LateResources {
-        // SysSlock: 2MHz
+        // HSI prescaler: 8, sys_clk: 2MHz
         let cfg = rcc::Config::hsi(rcc::Prescaler::Div8);
         let mut rcc = ctx.device.RCC.freeze(cfg);
         rcc.enable_low_power_mode();
