@@ -13,6 +13,7 @@ use hal::gpio::gpioa::{PA11, PA12};
 use hal::gpio::gpioc::PC14;
 use hal::gpio::{Output, PushPull, SignalEdge};
 use hal::prelude::*;
+use hal::rcc;
 use hal::stm32;
 use r3tl::Player;
 use rtfm::app;
@@ -37,7 +38,11 @@ const APP: () = {
 
     #[init(spawn = [play_ringtone])]
     fn init(mut ctx: init::Context) -> init::LateResources {
-        let mut rcc = ctx.device.RCC.constrain();
+        // SysSlock: 2MHz
+        let cfg = rcc::Config::hsi(rcc::Prescaler::Div8);
+        let mut rcc = ctx.device.RCC.freeze(cfg);
+        rcc.enable_low_power_mode();
+
         let gpioa = ctx.device.GPIOA.split(&mut rcc);
         let gpioc = ctx.device.GPIOC.split(&mut rcc);
         gpioa.pa0.listen(SignalEdge::Falling, &mut ctx.device.EXTI);
