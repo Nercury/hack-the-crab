@@ -50,6 +50,8 @@ impl Player {
         self.ringtone = None;
         self.frame_timer.unlisten();
         self.sound_timer.unlisten();
+        self.frame_timer.pause();
+        self.sound_timer.pause();
     }
 
     pub fn frame_tick(&mut self) {
@@ -84,7 +86,7 @@ struct Tone {
     pub frames: u32,
 }
 
-const SILENCE: Tone = Tone { freq: 1, frames: 0 };
+const SILENCE: Tone = Tone { freq: 10_000, frames: 0 };
 
 #[derive(Debug)]
 struct Ringtone {
@@ -177,7 +179,7 @@ impl Ringtone {
                 scale => octave = scale.to_digit(10).unwrap_or(self.octave),
             }
         }
-        let mut frames = 130 / duration;
+        let mut frames = 120 / duration;
         if dot {
             frames += frames / 2
         }
